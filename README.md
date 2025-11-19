@@ -7,6 +7,10 @@ This repository is the starter code for the NYU Reinforcement Learning and Optim
 - Fork this repository and do not change the repository name in your fork.  
 - Your fork must be named rob6323_go2_project so cluster scripts and paths work without modification.
 
+### Prerequisites
+
+- **GitHub Account:** You must have a GitHub account to fork this repository and manage your code. If you do not have one, [sign up here](https://github.com/join).
+
 ## Connect to Greene
 
 - Connect to the NYU Greene HPC via SSH; if you are off-campus or not on NYU Wi‑Fi, you must connect through the NYU VPN before SSHing to Greene.  
@@ -64,6 +68,8 @@ nano source/rob6323_go2/rob6323_go2/tasks/direct/rob6323_go2/rob6323_go2_env.py
 ```
 - Option C: Develop locally on your machine, push to your fork, then pull changes on Greene within your $HOME/rob6323_go2_project clone.
 
+> **Tip:** Don't forget to regularly push your work to github
+
 ## Launch training
 
 - From $HOME/rob6323_go2_project on Greene, submit a training job via the provided script.  
@@ -91,15 +97,24 @@ scp -r <netid>@dtn.hpc.nyu.edu:/home/<netid>/rob6323_go2_project/logs ./logs
 Using dtn.hpc.nyu.edu is recommended for large file transfers such as videos and event files.
 
 ## Visualize with TensorBoard
-If you wish, you can visualize the training metrics of your experiments the following way:
-- Install TensorBoard locally, start a tensorboard server at your downloaded logs directory, and open your browser at the local tensorboard webpage to inspect training metrics and learning curves.
-On your computer (not on greene!):
-```
-pip install tensorboard
-tensorboard --logdir ./logs
-```
-then open the provided localhost URL in your browser.
-TensorBoard will load the events files from your runs and display scalars, histograms, and other summaries for your training and evaluation phases.
+
+You can inspect training metrics (reward curves, loss values, episode lengths) using TensorBoard. This requires installing it on your local machine.
+
+1.  **Install TensorBoard:**
+    On your local computer (do NOT run this on Greene), install the package:
+    ```
+    pip install tensorboard
+    ```
+
+2.  **Launch the Server:**
+    Navigate to the folder where you downloaded your logs and start the server:
+    ```
+    # Assuming you are in the directory containing the 'logs' folder
+    tensorboard --logdir ./logs
+    ```
+
+3.  **View Metrics:**
+    Open your browser to the URL shown (usually `http://localhost:6006/`).
 
 ## Project scope reminder
 
