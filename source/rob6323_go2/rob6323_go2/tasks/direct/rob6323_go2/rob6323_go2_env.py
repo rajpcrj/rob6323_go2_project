@@ -279,6 +279,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # Penalize angular velocity in X and Y
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
+
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
         foot_height = (self.foot_positions_w[:, :, 2]).view(self.num_envs, -1) # - reference_heights
         target_height = 0.08 * phases + 0.02 # offset for foot radius 2cm
@@ -286,13 +287,13 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1) 
 
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
-        foot_forces = torch.norm(net_contact_forces[:, self.feet_indices, :], dim=-1)
+        foot_forces = torch.norm(net_contact_forces[:, self._feet_ids_sensor, :], dim=-1)
         desired_contact = self.desired_contact_states
         rew_tracking_contacts_shaped_force = 0.
         for i in range(4):
             rew_tracking_contacts_shaped_force += - (1 - desired_contact[:, i]) * (
                         1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))
-        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force 
+        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4.0 # Average of 4 feet
         # Add to rewards dict
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # Removed step_dt
