@@ -283,7 +283,7 @@ class Rob6323Go2Env(DirectRLEnv):
         foot_height = (self.foot_positions_w[:, :, 2]).view(self.num_envs, -1) # - reference_heights
         target_height = 0.08 * phases + 0.02 # offset for foot radius 2cm
         rew_foot_clearance = torch.square(target_height - foot_height) * (1 - self.desired_contact_states)
-        rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1) * self.rew_scales["feetClearance"]
+        rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1) 
 
         foot_forces = torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1)
         desired_contact = self.desired_contact_states
@@ -291,7 +291,7 @@ class Rob6323Go2Env(DirectRLEnv):
         for i in range(4):
             rew_tracking_contacts_shaped_force += - (1 - desired_contact[:, i]) * (
                         1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))
-        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force * self.rew_scales["trackingContactsShapedForce"] / 4
+        rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force 
         # Add to rewards dict
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # Removed step_dt
