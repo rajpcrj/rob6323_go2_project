@@ -280,7 +280,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # Penalize angular velocity in X and Y
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
-        foot_height = (self.foot_positions[:, :, 2]).view(self.num_envs, -1) # - reference_heights
+        foot_height = (self.foot_positions_w[:, :, 2]).view(self.num_envs, -1) # - reference_heights
         target_height = 0.08 * phases + 0.02 # offset for foot radius 2cm
         rew_foot_clearance = torch.square(target_height - foot_height) * (1 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1) * self.rew_scales["feetClearance"]
