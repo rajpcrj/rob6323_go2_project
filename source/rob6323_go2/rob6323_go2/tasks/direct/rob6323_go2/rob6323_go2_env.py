@@ -87,7 +87,11 @@ class Rob6323Go2Env(DirectRLEnv):
                 "orient",#: rew_orient * self.cfg.orient_reward_scale,
                 "lin_vel_z",#: rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
                 "dof_vel",# rew_dof_vel * self.cfg.dof_vel_reward_scale,
-                "ang_vel_xy" #: rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale    
+                "ang_vel_xy", #: rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale    
+                 "feet_clearance",# rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
+                    "tracking_contacts_shaped_force"#: rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale          
+            
+            
             ]
         }
         # Get specific body indices
