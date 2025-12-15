@@ -45,7 +45,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     ang_vel_xy_reward_scale = -0.001
 
 
-    action_rate_reward_scale = -0.1
+    action_rate_reward_scale = -0.4
 
 
     feet_clearance_reward_scale = -30.0
