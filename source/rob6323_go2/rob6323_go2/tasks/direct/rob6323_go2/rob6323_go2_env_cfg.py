@@ -102,6 +102,6 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
 
     # Additional reward scales
     orient_reward_scale = -5.0
-    lin_vel_z_reward_scale = -0.02
+    lin_vel_z_reward_scale = -0.1
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
