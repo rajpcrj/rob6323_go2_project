@@ -19,6 +19,7 @@ from isaaclab.utils.math import sample_uniform
 from isaaclab.sensors import ContactSensor
 from isaaclab.markers import VisualizationMarkers
 import isaaclab.utils.math as math_utils
+import random # extra credit, added for friction randomization
 
 from .rob6323_go2_env_cfg import Rob6323Go2EnvCfg
 
@@ -50,8 +51,8 @@ class Rob6323Go2Env(DirectRLEnv):
             for key in [
                 "track_lin_vel_xy_exp",
                 "track_ang_vel_z_exp",
-                "rew_action_rate",     # <--- Added
-                "raibert_heuristic",    # <--- Added
+                "rew_action_rate",     # <--- Added part 1
+                "raibert_heuristic",    # <--- Added part 1
                 "orient",
                 "lin_vel_z",
                 "dof_vel",
@@ -92,6 +93,12 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
+
+        # extra credit: actuator friction
+        self.fs_stiction = 0.0
+        self.mu_viscous = 0.0
+        self.t_stiction = 0.0
+        self.t_viscous = 0.0
 
     # Defines contact plan
     def _step_contact_targets(self):
@@ -186,6 +193,7 @@ class Rob6323Go2Env(DirectRLEnv):
         reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
 
         return reward
+    
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
@@ -226,6 +234,11 @@ class Rob6323Go2Env(DirectRLEnv):
             self.torque_limits,
         )
 
+        # extra credit: actuator friction
+        self.t_stiction = self.fs_stiction * np.tanh(self.robot.data.joint_vel/0.01)
+        self.t_viscous = self.mu_viscous * self.robot.data.joint_vel
+        torques = torques - self.t_stiction - self.t_viscous
+        
         # Apply torques to the robot
         self.robot.set_joint_effort_target(torques)
 
@@ -311,9 +324,9 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4  # Average over 4 feet
         
         rewards = {
-            "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
-            "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
-            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # Part 1
+            "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale, # Part 1
+            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale, # Part 1
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
@@ -365,6 +378,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
+        # randomization of friction coefficient
+        self.fs_stiction = random.uniform(0.0, 0.3)
+        self.mu_viscous = random.uniform(0.0, 2.5)
+        
         # Logging
         extras = dict()
         for key in self._episode_sums.keys():
