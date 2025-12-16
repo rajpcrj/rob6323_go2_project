@@ -235,7 +235,7 @@ class Rob6323Go2Env(DirectRLEnv):
         )
 
         # extra credit: actuator friction
-        self.t_stiction = self.fs_stiction * torch.tanh(self.robot.data.joint_vel/0.01)
+        self.t_stiction = self.fs_stiction * torch.tanh(self.robot.data.joint_vel/0.1)
         self.t_viscous = self.mu_viscous * self.robot.data.joint_vel
         torques = torques - self.t_stiction - self.t_viscous
 
