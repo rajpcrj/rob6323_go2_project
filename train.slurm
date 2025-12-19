@@ -99,7 +99,8 @@ export ISAACLAB_PATH=/workspace/isaaclab
 
 /isaac-sim/python.sh /workspace/run/scripts/rsl_rl/train.py \
   --task=Template-Rob6323-Go2-Direct-v0 \
-  --headless
+  --headless \
+  -- video 
 
 # Identify the latest-created/modified subdirectory under go2_flat_direct
 LATEST_DIR=$(ls -td /workspace/isaaclab/logs/rsl_rl/go2_flat_direct/*/ 2>/dev/null | head -n 1 || true)

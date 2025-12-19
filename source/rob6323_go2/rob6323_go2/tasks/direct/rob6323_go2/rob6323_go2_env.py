@@ -52,6 +52,7 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # X/Y linear velocity and yaw angular velocity commands
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
+        
 
         # Update Logging
         self._episode_sums = {
@@ -208,6 +209,9 @@ class Rob6323Go2Env(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+         # Added Height Scanner Ray Caster
+        self._height_scanner = RayCaster(self.cfg.height_scanner)
+        self.scene.sensors["height_scanner"] = self._height_scanner
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -215,9 +219,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         
-        # Added Height Scanner Ray Caster
-        self._height_scanner = RayCaster(self.cfg.height_scanner)
-        self.scene.sensors["height_scanner"] = self._height_scanner
+       
 
         # we need to explicitly filter collisions for CPU simulation
         if self.device == "cpu":
@@ -263,7 +265,7 @@ class Rob6323Go2Env(DirectRLEnv):
         ## Now get the height data . 
         height_data = (
                 self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
-            ).clip(-1.0, 1.0)
+            ).clip(-1.0, 1.0) * 0.00
 
         #print("Height Data is ",height_data.shape, self._height_scanner.data.pos)
         obs = torch.cat(
@@ -304,9 +306,14 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]
 
+        
+        # let's try with simply removing the raiber heuristic for now        
+        '''
         # === ADDED Part 4: Raibert heuristic ===
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
+        '''
+        
 
         # === ADDED: Part 5 - Orientation penalty ===
         # Penalize non-flat orientation (projected gravity XY should be 0 when robot is flat)
@@ -406,8 +413,8 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         # randomization of friction coefficient
-        self.fs_stiction[env_ids] = sample_uniform(0.0, 0.3, (len(env_ids), 12), device=self.device)
-        self.mu_viscous[env_ids] = sample_uniform(0.0, 2.5, (len(env_ids), 12), device=self.device)
+        self.fs_stiction[env_ids] = sample_uniform(0.0, 0.3, (len(env_ids), 12), device=self.device)*0.0   ## Changine the actuator frictions to zeros 
+        self.mu_viscous[env_ids] = sample_uniform(0.0, 2.5, (len(env_ids), 12), device=self.device)*0.0
         # Logging
         extras = dict()
         for key in self._episode_sums.keys():
