@@ -44,6 +44,8 @@ class Rob6323Go2Env(DirectRLEnv):
     def __init__(self, cfg: Rob6323Go2EnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
+    
+
         # Joint position command (deviation from default joint positions)
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
         self._previous_actions = torch.zeros(
@@ -172,43 +174,76 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
     def _reward_raibert_heuristic(self):
-        cur_footsteps_translated = self.foot_positions_w - self.robot.data.root_pos_w.unsqueeze(1)
+        # --- current feet in body frame (x,y,z) ---
+        cur_footsteps_translated = self.foot_positions_w - self.robot.data.root_pos_w.unsqueeze(1)  # (N,4,3)
         footsteps_in_body_frame = torch.zeros(self.num_envs, 4, 3, device=self.device)
         for i in range(4):
-            footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(math_utils.quat_conjugate(self.robot.data.root_quat_w),
-                                                            cur_footsteps_translated[:, i, :])
+            footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(
+                math_utils.quat_conjugate(self.robot.data.root_quat_w),
+                cur_footsteps_translated[:, i, :],
+            )
 
-        # nominal positions: [FR, FL, RR, RL]
+        # nominal positions (order: [FL, FR, RL, RR])
         desired_stance_width = 0.25
-        desired_ys_nom = torch.tensor([desired_stance_width / 2, -desired_stance_width / 2, desired_stance_width / 2, -desired_stance_width / 2], device=self.device).unsqueeze(0)
+        desired_ys_nom = torch.tensor(
+            [ desired_stance_width / 2, -desired_stance_width / 2,  desired_stance_width / 2, -desired_stance_width / 2],
+            device=self.device,
+        ).unsqueeze(0)  # (1,4)
 
         desired_stance_length = 0.45
-        desired_xs_nom = torch.tensor([desired_stance_length / 2,  desired_stance_length / 2, -desired_stance_length / 2, -desired_stance_length / 2], device=self.device).unsqueeze(0)
+        desired_xs_nom = torch.tensor(
+            [ desired_stance_length / 2,  desired_stance_length / 2, -desired_stance_length / 2, -desired_stance_length / 2],
+            device=self.device,
+        ).unsqueeze(0)  # (1,4)
 
         # raibert offsets
-        phases = torch.abs(1.0 - (self.foot_indices * 2.0)) * 1.0 - 0.5
+        phases = torch.abs(1.0 - (self.foot_indices * 2.0)) * 1.0 - 0.5  # (N,4)
         frequencies = torch.tensor([3.0], device=self.device)
-        x_vel_des = self._commands[:, 0:1]
-        yaw_vel_des = self._commands[:, 2:3]
+        x_vel_des = self._commands[:, 0:1]     
+        yaw_vel_des = self._commands[:, 2:3]   
         y_vel_des = yaw_vel_des * desired_stance_length / 2
-        desired_ys_offset = phases * y_vel_des * (0.5 / frequencies.unsqueeze(1))
+
+        desired_ys_offset = phases * y_vel_des * (0.5 / frequencies.unsqueeze(1))  # (N,4)
         desired_ys_offset[:, 2:4] *= -1
-        desired_xs_offset = phases * x_vel_des * (0.5 / frequencies.unsqueeze(1))
+        desired_xs_offset = phases * x_vel_des * (0.5 / frequencies.unsqueeze(1))  # (N,4)
 
-        desired_ys_nom = desired_ys_nom + desired_ys_offset
-        desired_xs_nom = desired_xs_nom + desired_xs_offset
+        desired_ys = desired_ys_nom + desired_ys_offset 
+        desired_xs = desired_xs_nom + desired_xs_offset 
+        desired_xy = torch.stack((desired_xs, desired_ys), dim=-1)  # (N,4,2)
 
-        desired_footsteps_body_frame = torch.cat((desired_xs_nom.unsqueeze(2), desired_ys_nom.unsqueeze(2)), dim=2)
+        # --- terrain-aware Z at each desired (x,y) using ray hits in BODY frame ---
+        # ray hits in world -> body (yaw) frame
+        ray_hits_b = self._get_ray_hits_in_body()   # (N, R, 3)
+        ray_xy = ray_hits_b[..., :2]                # (N, R, 2)
+        ray_z  = ray_hits_b[..., 2]                 # (N, R)
+        # snap each desired foot (x,y) to nearest ray (in body frame)
+        dist = torch.norm(ray_xy.unsqueeze(1) - desired_xy.unsqueeze(2), dim=-1)  # (N,4,R)
+        closest_idx = torch.argmin(dist, dim=-1)                                   # (N,4)
 
-        err_raibert_heuristic = torch.abs(desired_footsteps_body_frame - footsteps_in_body_frame[:, :, 0:2])
+        terrain_z_at_foot = torch.gather(ray_z, 1, closest_idx)       # (N,4)  (body-frame z of ground under desired xy)
 
-        reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
+        # clearance profile (simple + optional swing lift)
+        base_clearance = 0.05
+        swing_lift = 0.08
+        # Changing desired_contact_states aso  lifts only in swing:
+        clearance = base_clearance + swing_lift * (1.0 - self.desired_contact_states)  # (N,4)
 
-        return reward
-    
+        desired_z = terrain_z_at_foot + clearance                       # (N,4)
+        desired_xyz = torch.cat((desired_xy, desired_z.unsqueeze(-1)), dim=-1)  # (N,4,3)
+
+        # error in xyz (you can weight z if you want)
+        err = desired_xyz - footsteps_in_body_frame                     # (N,4,3)
+        self.rew_feet_clearance = torch.sum(err * err, dim=(1, 2))                       # (N,)
+
+        return self.rew_feet_clearance
+        
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+
+      
+
+
          # Added Height Scanner Ray Caster
         self._height_scanner = RayCaster(self.cfg.height_scanner)
         self.scene.sensors["height_scanner"] = self._height_scanner
@@ -263,9 +298,15 @@ class Rob6323Go2Env(DirectRLEnv):
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
         ## Now get the height data . 
-        self.height_data = (
-                self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
-            ).clip(-1.0, 1.0) 
+        # Height of terrain under each ray, relative to BASE (not scanner origin)
+        base_z = self.robot.data.root_pos_w[:, 2].unsqueeze(1)          # (N,1)
+        ray_hits_w = self._height_scanner.data.ray_hits_w
+        if ray_hits_w.ndim == 2:
+            ray_hits_w = ray_hits_w.view(self.num_envs, -1, 3)
+
+        hit_z = ray_hits_w[..., 2]  # (N, R)
+        self.height_data = (base_z - hit_z).clamp(-1.0, 1.0)  # (N, R)
+
 
         #print("Height Data is ",height_data.shape, self._height_scanner.data.pos)
         obs = torch.cat(
@@ -288,6 +329,34 @@ class Rob6323Go2Env(DirectRLEnv):
         )
         observations = {"policy": obs}
         return observations
+
+    ## Adding a function which will set the ray hit to x,y in robot coordinate frames 
+
+    def _get_ray_hits_in_body(self):
+        ray_hits_w = self._height_scanner.data.ray_hits_w
+
+        # RayCaster may return (N, R, 3) OR flattened (N*R, 3)
+        if ray_hits_w.ndim == 2:
+            ray_hits_w = ray_hits_w.view(self.num_envs, -1, 3)  # -> (N, R, 3)
+
+        N, R, _ = ray_hits_w.shape
+
+        root_pos = self.robot.data.root_pos_w   # (N, 3)
+        root_quat = self.robot.data.root_quat_w # (N, 4)
+
+        # relative hit positions in world
+        rel = ray_hits_w - root_pos.unsqueeze(1)     # (N, R, 3)
+
+        # quat_apply_yaw expects leading dimension to match quat dimension,
+        # so flatten rays and repeat quats R times
+        rel_flat = rel.reshape(N * R, 3)  # (N*R, 3)
+        quat_flat = math_utils.quat_conjugate(root_quat).repeat_interleave(R, dim=0)  # (N*R, 4)
+
+        hits_b_flat = math_utils.quat_apply_yaw(quat_flat, rel_flat)  # (N*R, 3)
+
+        return hits_b_flat.view(N, R, 3)  # (N, R, 3)
+
+    
 
     def _get_rewards(self) -> torch.Tensor:
         # linear velocity tracking
@@ -313,8 +382,10 @@ class Rob6323Go2Env(DirectRLEnv):
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
         '''
-        rew_raibert_heuristic = torch.zeros(self.num_envs, device=self.device)
 
+        ## Changed the reuber_heuristics to work with the sensor data
+        self._step_contact_targets()
+        rew_raibert_heuristic = self._reward_raibert_heuristic()
         # === ADDED: Part 5 - Orientation penalty ===
         # Penalize non-flat orientation (projected gravity XY should be 0 when robot is flat)
         rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
@@ -333,32 +404,11 @@ class Rob6323Go2Env(DirectRLEnv):
         # phases: 0 at start/end of swing, 1 at apex of swing
         #phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
         # Get foot heights (Z coordinate in world frame)
-        foot_heights = self.foot_positions_w[:, :, 2]
         
 
-        terrain_height = self.height_data[
-            :, int(0.35 * self.height_data.shape[1]) : int(0.65 * self.height_data.shape[1])
-        ].mean(dim=1, keepdim=True)
 
-        base_clearance = 0.05
-        terrain_gain = 0.7
-        max_clearance = 0.18
-
-        # compute target height from terrain
-        target_height = base_clearance + terrain_gain * terrain_height
-        target_height = torch.clamp(target_height, base_clearance, max_clearance)
-
-        # optional randomization
-        rand_offset = 0.02 * torch.rand_like(target_height)
-        target_height = torch.clamp(
-            target_height + rand_offset,
-            base_clearance,
-            max_clearance,
-        )
-
-        # Penalize deviation from target, only during swing (when desired_contact_states is 0)
-        rew_foot_clearance = torch.square(target_height - foot_heights) * (1 - self.desired_contact_states)
-        rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
+        
+               
 
         # === ADDED Part 6: Tracking contacts shaped force ===
         # Matches IsaacGym reference: reference/go2_terrain.py compute_reward_CaT()
@@ -382,7 +432,7 @@ class Rob6323Go2Env(DirectRLEnv):
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
-            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
+            "feet_clearance": self.rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
             "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
@@ -401,7 +451,7 @@ class Rob6323Go2Env(DirectRLEnv):
         cstr_base_height_min = base_height < self.cfg.base_height_min
 
         # apply all terminations
-        died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
+        died = cstr_termination_contacts | cstr_upsidedown  #| cstr_base_height_min
         return died, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
