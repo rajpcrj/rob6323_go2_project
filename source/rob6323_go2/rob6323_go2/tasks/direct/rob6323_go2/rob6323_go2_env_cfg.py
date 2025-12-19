@@ -32,8 +32,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     
 
     raibert_heuristic_reward_scale = 0.0 # -10.0
-    feet_clearance_reward_scale = 0.0 #-30.0
-    tracking_contacts_shaped_force_reward_scale = 0 # 4.0
+    feet_clearance_reward_scale = -40 #-30.0
+    tracking_contacts_shaped_force_reward_scale = 10 # 4.0
     
     state_space = 0
     debug_vis = True
@@ -109,8 +109,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
 
     # reward scales
-    lin_vel_reward_scale = 1.0
-    yaw_rate_reward_scale = 0.5
+    lin_vel_reward_scale = 10.0
+    yaw_rate_reward_scale = 5
     action_rate_reward_scale = 0.0  ## Keeping it zero for now -0.05 
 
     # Additional reward scales
