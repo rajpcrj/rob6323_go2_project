@@ -263,9 +263,9 @@ class Rob6323Go2Env(DirectRLEnv):
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
         ## Now get the height data . 
-        height_data = (
+        self.height_data = (
                 self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
-            ).clip(-1.0, 1.0) * 0.00
+            ).clip(-1.0, 1.0) 
 
         #print("Height Data is ",height_data.shape, self._height_scanner.data.pos)
         obs = torch.cat(
@@ -278,7 +278,7 @@ class Rob6323Go2Env(DirectRLEnv):
                     self._commands,
                     self.robot.data.joint_pos - self.robot.data.default_joint_pos,
                     self.robot.data.joint_vel,
-                    height_data,
+                    self.height_data,
                     self._actions,
                     self.clock_inputs,
                 )
@@ -313,7 +313,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self._step_contact_targets()
         rew_raibert_heuristic = self._reward_raibert_heuristic()
         '''
-        
+        rew_raibert_heuristic = torch.zeros(self.num_envs, device=self.device)
 
         # === ADDED: Part 5 - Orientation penalty ===
         # Penalize non-flat orientation (projected gravity XY should be 0 when robot is flat)
@@ -331,15 +331,31 @@ class Rob6323Go2Env(DirectRLEnv):
         # === ADDED: Penalize low foot height during swing phase ===
         # Matches IsaacGym reference: reference/go2_terrain.py compute_reward_CaT()
         # phases: 0 at start/end of swing, 1 at apex of swing
-        phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
+        #phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
         # Get foot heights (Z coordinate in world frame)
         foot_heights = self.foot_positions_w[:, :, 2]
-        # Target height: 8cm max clearance at swing apex + 2cm foot radius offset
+        
 
-        rand_offset = 0.05 * torch.rand(self.num_envs, 1, device=self.device)
-        target_height = 0.08 * phases + 0.02 # Removred it for once  rand_offset## Temporarily adding some extra height so that rough terrain can be cleared . No height data will be used as of now 
-        
-        
+        terrain_height = self.height_data[
+            :, int(0.35 * self.height_data.shape[1]) : int(0.65 * self.height_data.shape[1])
+        ].mean(dim=1, keepdim=True)
+
+        base_clearance = 0.05
+        terrain_gain = 0.7
+        max_clearance = 0.18
+
+        # compute target height from terrain
+        target_height = base_clearance + terrain_gain * terrain_height
+        target_height = torch.clamp(target_height, base_clearance, max_clearance)
+
+        # optional randomization
+        rand_offset = 0.02 * torch.rand_like(target_height)
+        target_height = torch.clamp(
+            target_height + rand_offset,
+            base_clearance,
+            max_clearance,
+        )
+
         # Penalize deviation from target, only during swing (when desired_contact_states is 0)
         rew_foot_clearance = torch.square(target_height - foot_heights) * (1 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
@@ -413,8 +429,8 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         # randomization of friction coefficient
-        self.fs_stiction[env_ids] = sample_uniform(0.0, 0.3, (len(env_ids), 12), device=self.device)*0.0   ## Changine the actuator frictions to zeros 
-        self.mu_viscous[env_ids] = sample_uniform(0.0, 2.5, (len(env_ids), 12), device=self.device)*0.0
+        self.fs_stiction[env_ids] = sample_uniform(0.0, 0.3, (len(env_ids), 12), device=self.device)   ## Changine the actuator frictions to zeros 
+        self.mu_viscous[env_ids] = sample_uniform(0.0, 2.5, (len(env_ids), 12), device=self.device)
         # Logging
         extras = dict()
         for key in self._episode_sums.keys():
